@@ -3,7 +3,7 @@
 **Contribution Number:** [1]  
 **Student:** [Raymond Lin]  
 **Issue:** [GitHub issue link](https://github.com/carlos-emr/carlos/issues/2316)  
-**Status:** [Phase I] [In Progress]
+**Status:** [Phase I] [Completed]
 
 ---
 
