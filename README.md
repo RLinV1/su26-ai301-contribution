@@ -8,15 +8,14 @@
 ---
 
 ## Why I Chose This Issue
-
-[1-2 paragraphs explaining why this issue interests you, how it matches your skills/learning goals, what you hope to learn]
-
 I'm working with the issue [Security] XSS defense-in-depth — image filename unencoded in eform/efmimagemanager.jsp (claude assist) because it aligns with my cybersecurity and frontend experience. The issue is a low severity and is a good starter issue and has a clear criteria on what to fix and a sugguested fix. 
 
 I'm interested in this since it works with XSS which is a harmful cyberattack that malicious attackers can do and 
 compromise security systems due to running external code. I've previously taken a security fundamentals class and have
 taken a certification from SANS which went over XSS attacks and how to mitage these attacks. The issue  doesn't seem to 
 difficult to fix and I understand the current issue is regarding the filename input.
+
+I hope to learn more about open source contribution and how to work in mitaging XSS on real world codebases.
 
 ---
 
