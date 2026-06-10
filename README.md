@@ -1,4 +1,4 @@
-# Contribution [1]: [Security] XSS defense-in-depth — image filename unencoded in eform/efmimagemanager.jsp (claude assist)
+# Contribution [1]: [Security] RLinV1 XSS defense-in-depth — image filename unencoded in eform/efmimagemanager.jsp (claude assist)
 
 **Contribution Number:** [1]  
 **Student:** [Raymond Lin]  
