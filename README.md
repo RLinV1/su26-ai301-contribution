@@ -23,20 +23,31 @@ difficult to fix and I understand the current issue is regarding the filename in
 ## Understanding the Issue
 
 ### Problem Description
-
-[In your own words, what's broken or missing?]
+The problem is that the page outputs user input data that could be intereperted as code. This enables XSS since it allows
+user to input javascript code without the code being encoded first to be harmless
 
 ### Expected Behavior
+Filenames should be encoded at the point of output before being rendered into HTML attributes and JavaScript strings, regardless of what upstream validation has already done.
 
-[What should happen?]
+title="<%=curimage%>" → should use HTML attribute encoding
+showImage('<%=fileURL%>', ...) → should use JavaScript encoding
+><%=curimage%> → should use HTML body encoding
 
 ### Current Behavior
 
-[What actually happens?]
+In `efmimagemanager.jsp`, `curimage` (the image filename) is written into the page in three places without encoding:
+
+- **Line 100** — HTML `title` attribute: `<td title="<%=curimage%>">` — a filename containing `"` could break out of the attribute.
+- **Line 102** — JavaScript `onclick` string: `onclick="showImage('<%=fileURL%>', ...)"` — `fileURL` embeds the raw filename; a `'` or `)` in the name could close the JS string and inject code.
+- **Line 102** — HTML link text: `><%=curimage%></a>` — filename rendered as raw HTML content.
+
+Upload validation in `PathValidationUtils.validateFileName()` currently restricts filenames to `[a-zA-Z0-9._]`, so no exploit is possible today. However this is a single point of defense: if validation is ever weakened, bypassed, or a new upload path is added without the same check, all three locations become live XSS sinks. Line 107 (the delete link) already applies `<carlos:encode context="javaScriptAttribute">` correctly and is the reference pattern.
 
 ### Affected Components
 
-[Which parts of the codebase are involved?]
+- **Primary file:** `src/main/webapp/WEB-INF/jsp/eform/efmimagemanager.jsp` — lines 100 and 102 are the unencoded output points; line 107 is the correctly-encoded model to follow.
+- **Data source:** `io.github.carlos_emr.carlos.eform.EFormUtil#listImages()` — supplies the raw filename strings rendered on the page.
+- **Encoding infrastructure:** `<carlos:encode>` tag (`carlos` TLD) and `SafeEncode` utility class — the null-safe CARLOS wrappers that must be applied at the three unencoded locations.
 
 ---
 
