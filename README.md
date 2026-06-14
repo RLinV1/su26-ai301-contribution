@@ -224,7 +224,7 @@ Using UMPIRE framework (adapted):
 
 ## Implementation Notes
 
-### Week [X] Progress
+### Week 2-3 Progress
 
 **Issue #2316 — XSS defense-in-depth in `efmimagemanager.jsp` (eForm Image Library)**
 
@@ -240,9 +240,9 @@ Using UMPIRE framework (adapted):
 - Used **context-specific encoding per sink** rather than one blanket encoder, because each value lands in a different context (HTML attribute vs. JS-in-attribute vs. HTML body).
 - Left `<%="image" + i%>` unencoded — it's a server-controlled loop integer, no user input.
 
-### Week [Y] Progress
+### Week 3-4 Progress
+Working on creating good unit tests to test the functionality and ensure all files are encoded and no XSS attacks can occur.
 
-[continue as you work — e.g. PR review feedback, CI results, reporter verification of the fix]
 
 ### Code Changes
 
