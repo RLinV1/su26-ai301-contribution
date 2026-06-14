@@ -126,10 +126,10 @@ If both alerts fire, issue #2316 is reproduced. If the rows appear but the alert
 
 - **Working branch (fork):** https://github.com/RLinV1/carlos/tree/fix-issue-2316
 - **Demo video:**
+https://github.com/user-attachments/assets/7f700d29-ea0c-41a5-959d-aae0c0a7614f
 
-https://github.com/user-attachments/assets/c168adf7-5b74-4a80-bcf9-c8d95f580801
 
-  (Fallback if the player doesn't load: [demo.mp4](demo.mp4))
+  
 - **Screenshots/logs:** ![This alert happens when clicking on the image](image-1.png)
 ![This error happens on hover over](image-2.png)
 
