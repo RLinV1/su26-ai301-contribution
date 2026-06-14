@@ -257,7 +257,7 @@ The change (2 lines, 3 sinks):
 | 102  | `onclick` `showImage()` JS string (`fileURL`) | `javaScriptAttribute` |
 | 102  | link text / HTML body (`curimage`) | `html` |
 
-**Key commits:** Not yet committed/pushed — staged with conventional message `fix(eform): encode image filenames in efmimagemanager.jsp to prevent XSS` (references `fixes #2316`). Will push to fork `RLinV1/carlos` on branch `fix-issue-2316`. _(Add the commit/PR link here once pushed.)_
+**Key commits:** Committed with the Conventional Commits message `fix: encode eform image filenames in efmimagemanager.jsp to prevent XSS (fixes carlos-emr#2316)` on branch `fix-issue-2316` of fork `RLinV1/carlos`. _(Add the commit/PR link here once pushed.)_
 
 **Approach decisions / why:**
 - **`<carlos:encode>` (null-safe wrapper) over raw OWASP `Encode.*` / `<e:>`** — project policy: raw OWASP renders the literal string `"null"` for null values; the CARLOS wrapper coalesces null to empty. CI (`check-encoder-null-safety.sh`) enforces this.
