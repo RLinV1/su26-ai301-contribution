@@ -321,7 +321,7 @@ https://github.com/user-attachments/assets/9acc8059-c5c7-4f65-8e77-885b09e88793
 
 **PR Link:** https://github.com/carlos-emr/carlos/pull/2896
 
-**PR Description** (draft — ready to paste when opening the PR):
+**PR Description** (as submitted):
 
 > ## What does this PR do?
 >
