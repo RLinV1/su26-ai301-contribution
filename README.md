@@ -127,12 +127,11 @@ If all three alerts fire, issue #2316 is reproduced. If the rows appear but the 
 
 ### Reproduction Evidence
 
-- **Working branch (fork):** https://github.com/RLinV1/carlos/tree/fix-issue-2316
-- **Demo video:**
+**Demo video** — reproduction of all three sinks and the post-fix behavior:
+
 https://github.com/user-attachments/assets/7f700d29-ea0c-41a5-959d-aae0c0a7614f
 
-
-  
+- **Working branch (fork):** https://github.com/RLinV1/carlos/tree/fix-issue-2316
 - **Screenshots/logs:** ![This alert happens when clicking on the image](image-1.png)
 ![This error happens on hover over](image-2.png)
 
