@@ -1,3 +1,4 @@
+
 # Contribution [1]: [Security] RLinV1 XSS defense-in-depth — image filename unencoded in eform/efmimagemanager.jsp (claude assist)
 
 **Contribution Number:** [1]  
@@ -126,7 +127,7 @@ If both alerts fire, issue #2316 is reproduced. If the rows appear but the alert
 - **Working branch (fork):** https://github.com/RLinV1/carlos/tree/fix-issue-2316
 - **Demo video:**
 
-  <video src="https://github.com/RLinV1/su26-ai301-contribution/raw/main/demo.mp4" controls width="600"></video>
+https://github.com/user-attachments/assets/c168adf7-5b74-4a80-bcf9-c8d95f580801
 
   (Fallback if the player doesn't load: [demo.mp4](demo.mp4))
 - **Screenshots/logs:** ![This alert happens when clicking on the image](image-1.png)
