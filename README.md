@@ -3,7 +3,7 @@
 **Contribution Number:** [1]  
 **Student:** [Raymond Lin]  
 **Issue:** [GitHub issue link](https://github.com/carlos-emr/carlos/issues/2316)  
-**Status:** [Phase I] [Completed]
+**Status:** Phase I — Completed · Phase II — Completed
 
 ---
 
@@ -54,19 +54,73 @@ Upload validation in `PathValidationUtils.validateFileName()` currently restrict
 
 ### Environment Setup
 
-[Notes on setting up your local development environment - challenges you faced, how you solved them]
+The CARLOS EMR project uses a Docker-based devcontainer. Here is how I set up the local development environment.
+
+**Prerequisites**
+- Docker Desktop (installed and running)
+- VS Code with the "Dev Containers" extension by Microsoft
+- Git
+
+**Steps**
+
+1. Clone the repository and open it in VS Code:
+   ```bash
+   git clone https://github.com/carlos-emr/carlos.git
+   cd carlos
+   code ./
+   ```
+
+2. VS Code detects the `.devcontainer` folder and prompts "Reopen in Container" — click it. If the prompt does not appear, click the green remote-connection icon (bottom-left of VS Code) and select "Reopen in Container".
+
+3. Wait for the container to finish building. On first run this takes several minutes; the application container waits for a database health check before starting.
+
+4. Compile the project inside the container:
+   ```bash
+   make clean
+   make install
+   ```
+   First-time compilation can take a long time (~8 min on Windows) due to Maven downloading dependencies. Subsequent builds are faster.
+
+5. Access the app at `http://localhost:8080/carlos`.
+   - Username: `carlosdoc` / Password: `carlos2026` / PIN: `2026`
+   - On first login you are forced to reset the password — use the same credentials to complete it.
+
+**Challenges faced**
+- App intially failed with make install but a rerun of make install worked.
+- App also took well over 30 minutes in my local machine to start and requires patience
+![Error](image.png)
 
 ### Steps to Reproduce
 
-1. [Step 1]
-2. [Step 2]
-3. [Observed result]
+The upload validation in `PathValidationUtils.validateFileName()` strips special characters at upload time, so a malicious filename cannot be uploaded through the normal UI. To demonstrate the vulnerability in the rendering layer, a file is placed directly on the container filesystem — bypassing the upload path but exercising the exact code path that `efmimagemanager.jsp` uses to read and render filenames.
+
+1. Start the devcontainer and log in at `http://localhost:8080/carlos` (`carlosdoc` / `carlos2026`).
+
+2. Find the eform image directory inside the container:
+   ```bash
+   docker exec -it carlos-tomcat-dev find / -path "*eform*" -name "*.jpg" 2>/dev/null
+   ```
+   Use the directory of any result as the target path.
+
+3. Place a file with a malicious filename directly into that directory:
+   ```bash
+   docker exec carlos-tomcat-dev touch "/path/to/eform/images/');alert(1);//.jpg"
+   ```
+
+4. Navigate to the eform image manager in the browser (log in, open any eform, and access the image manager from within it).
+
+5. Observe the result — right-click → View Page Source and search for the filename. You will see `');alert(1);//.jpg` injected raw into the `title` attribute, the `onclick` string, and the link text without any encoding.
 
 ### Reproduction Evidence
 
-- **Commit showing reproduction:** [Link to commit in your fork]
-- **Screenshots/logs:** [If applicable]
-- **My findings:** [What you discovered during reproduction]
+- **Working branch (fork):** https://github.com/RLinV1/carlos/tree/fix-issue-2316
+- **Screenshots/logs:** `image.png` (devcontainer build error during first `make install`, resolved on rerun). Page-source capture of the injected filename to be added with the reproduction commit.
+- **My findings:**
+  - The vulnerability reproduces **consistently** (confirmed across two separate page loads, not a fluke). Once a file named `');alert(1);//.jpg` exists in the eform image directory, every render of `efmimagemanager.jsp` emits the filename unencoded in all three locations.
+  - **Expected behavior:** the filename should appear encoded — e.g. the `'` should be escaped before it lands inside the `onclick` JavaScript string and the `"` should be HTML-attribute-encoded inside `title`.
+  - **Actual behavior:** View Page Source shows the raw bytes `');alert(1);//.jpg` written verbatim into the `title` attribute, the `showImage('<%=fileURL%>', ...)` `onclick` string, and the link text. In the `onclick` context the leading `');` closes the JavaScript string and call, demonstrating the sink is live.
+  - **Key insight:** the bug is **only** latent because `PathValidationUtils.validateFileName()` strips everything outside `[a-zA-Z0-9._]` at upload time. Reproduction required dropping the file directly onto the container filesystem (`docker exec ... touch`) to bypass that single input filter — which is exactly why the issue is framed as *defense-in-depth*: the rendering layer trusts upstream sanitization that could be weakened, bypassed, or skipped by a future upload path.
+  - **Reference pattern confirmed:** line 107's `deleteImg()` call already wraps `curimage` in `<carlos:encode context="javaScriptAttribute">`, so the same filename renders **safely** there in the same page — proving the fix pattern works and the three other sinks are simply inconsistent omissions.
 
 ---
 
@@ -74,30 +128,49 @@ Upload validation in `PathValidationUtils.validateFileName()` currently restrict
 
 ### Analysis
 
-[Your analysis of the root cause - what's causing the issue?]
+**Root cause.** JSP `<%= ... %>` expression scriptlets perform **no output encoding** — whatever string they evaluate is written to the response byte-for-byte. In `efmimagemanager.jsp`, the image filename (`curimage`, and `fileURL` which is built from it) is emitted through three such raw expressions:
+
+- **Line 100** — `<td title="<%=curimage%>">` → HTML attribute context, no encoding.
+- **Line 102** — `onclick="showImage('<%=fileURL%>', ...)"` → JavaScript-string-inside-HTML-attribute context, no encoding.
+- **Line 102** — `><%=curimage%></a>` → HTML body/text context, no encoding.
+
+The data originates from `EFormUtil#listImages()`, which simply lists filenames on disk and does not encode them. So the responsibility for safe output is never met anywhere in the chain. The reason no exploit fires today is a *single* upstream control — `PathValidationUtils.validateFileName()` restricting filenames to `[a-zA-Z0-9._]`. That is input sanitization, not output encoding, and relying on it alone violates defense-in-depth: one removed/weakened/bypassed filter (or a new upload path that forgets the check) turns all three lines into live XSS sinks.
 
 ### Proposed Solution
 
-[High-level description of your fix approach]
+Apply **context-specific output encoding at the point of output** for each of the three sinks, using the project's existing `<carlos:encode>` tag — exactly the pattern line 107 already uses for `deleteImg()`. No change to validation, data layer, or behavior for legitimate filenames; this is a pure hardening change that makes the output safe regardless of what upstream validation does. Three contexts map to the three sinks:
+
+| Line | Sink context | Encoding to apply |
+|------|--------------|-------------------|
+| 100  | HTML `title` attribute | `<carlos:encode context="htmlAttribute">` |
+| 102  | JS string in `onclick` (`fileURL`) | `<carlos:encode context="javaScriptAttribute">` |
+| 102  | HTML link text | `<carlos:encode context="html">` |
 
 ### Implementation Plan
 
 Using UMPIRE framework (adapted):
 
-**Understand:** [Restate the problem]
+**Understand:** A user-controlled image filename is written into an HTML attribute, a JavaScript string, and HTML body text in `efmimagemanager.jsp` without output encoding. Only upstream filename sanitization prevents XSS today. The filename should be context-encoded at output so the page is safe even if that single upstream control fails.
 
-**Match:** [What similar patterns/solutions exist in the codebase?]
+**Match:** Line 107 of the **same file** is the canonical example: `deleteImg('<carlos:encode context="javaScriptAttribute"><%=curimage%></carlos:encode>')`. The `<carlos:encode>` tag (from the `carlos` TLD) and its backing `SafeEncode` utility are the project-standard, null-safe wrappers around OWASP Encoder, which CONTRIBUTING.md mandates for all output. I will mirror this existing, already-reviewed pattern rather than introduce anything new.
 
-**Plan:** [Step-by-step implementation plan]
-1. [Modify file X to do Y]
-2. [Add function Z]
-3. [Update tests]
+**Plan:**
+1. In `src/main/webapp/WEB-INF/jsp/eform/efmimagemanager.jsp`, wrap the **line 100** `title` value: `title="<carlos:encode context="htmlAttribute"><%=curimage%></carlos:encode>"`.
+2. Wrap the **line 102** `fileURL` inside the `showImage(...)` `onclick` with `context="javaScriptAttribute"`.
+3. Wrap the **line 102** link-text `<%=curimage%>` with `context="html"`.
+4. Confirm the `carlos` taglib is already declared at the top of the JSP (it must be, since line 107 uses it) — no new `<%@ taglib %>` directive needed.
+5. Leave `PathValidationUtils` and `EFormUtil` untouched — the fix is intentionally scoped to the output layer (one logical change per PR, per CONTRIBUTING.md).
 
-**Implement:** [Link to your branch/commits as you work]
+**Implement:** Branch `fix-issue-2316` on fork `RLinV1/carlos`, targeting the upstream **`develop`** branch (per CONTRIBUTING.md — never `main`). Commits use Conventional Commits + DCO sign-off, e.g. `git commit -s -m "fix: encode image filename output in efmimagemanager.jsp"`. _(Branch link above; commit links added in Phase III as I implement.)_
 
-**Review:** [Self-review checklist - does it follow the project's contribution guidelines?]
+**Review:** Self-review checklist against CONTRIBUTING.md:
+- [ ] Uses OWASP-backed `<carlos:encode>` (mandatory security guideline) rather than hand-rolled escaping.
+- [ ] One focused logical change; no unrelated edits; existing copyright header retained.
+- [ ] Commit follows Conventional Commits (`fix:`) **and** is DCO-signed (`-s`).
+- [ ] PR targets `develop`, references the issue (`fixes #2316`), and explains the defense-in-depth rationale.
+- [ ] Behavior for valid `[a-zA-Z0-9._]` filenames is unchanged (encoders are no-ops on safe characters).
 
-**Evaluate:** [How will you verify it works?]
+**Evaluate:** See Testing Strategy below — manual before/after reproduction with the malicious filename, plus a JUnit 5 encoding assertion to lock the behavior in.
 
 ---
 
@@ -170,6 +243,9 @@ Using UMPIRE framework (adapted):
 
 ## Resources Used
 
-- [Link to helpful documentation]
-- [Tutorial or Stack Overflow post that helped]
-- [GitHub issues or discussions that helped]
+- **[Issue #2316](https://github.com/carlos-emr/carlos/issues/2316)** — the source issue; provided the affected file, the three unencoded sinks, the severity rationale (mitigated by upload sanitization), and the suggested context-specific fix.
+- **CARLOS `CONTRIBUTING.md`** — defined the conventions I built the plan around: target the `develop` branch, DCO sign-off (`git commit -s`), Conventional Commits (`fix:`), JUnit 5 tests in `src/test-modern/` with BDD naming, and the mandatory use of OWASP-backed encoders.
+- **Line 107 of `efmimagemanager.jsp` (`deleteImg()` with `<carlos:encode context="javaScriptAttribute">`)** — the in-repo reference pattern I'm mirroring for the fix.
+- **[OWASP XSS Prevention Cheat Sheet](https://cheatsheetseries.owasp.org/cheatsheets/Cross_Site_Scripting_Prevention_Cheat_Sheet.html)** — confirmed the principle of context-specific output encoding (HTML attribute vs. JavaScript vs. HTML body) and why output encoding is the correct defense-in-depth layer over input sanitization alone.
+- **[OWASP Java Encoder](https://owasp.org/www-project-java-encoder/)** — the library the project's `<carlos:encode>` / `SafeEncode` wrappers are built on.
+- **[VS Code Dev Containers documentation](https://code.visualstudio.com/docs/devcontainers/containers)** — used to set up and troubleshoot the Docker-based devcontainer environment during reproduction.
