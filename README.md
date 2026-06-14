@@ -196,6 +196,7 @@ Using UMPIRE framework (adapted):
 
 **Evaluate:** See Testing Strategy below — manual before/after reproduction with the malicious filename, plus a JUnit 5 encoding assertion to lock the behavior in.
 
+
 ---
 
 ## Testing Strategy
@@ -232,6 +233,10 @@ Using UMPIRE framework (adapted):
 - **Files modified:** [List]
 - **Key commits:** [Links to important commits]
 - **Approach decisions:** [Why you chose certain approaches]
+
+
+
+https://github.com/user-attachments/assets/9acc8059-c5c7-4f65-8e77-885b09e88793
 
 ---
 
