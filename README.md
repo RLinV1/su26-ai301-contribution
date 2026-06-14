@@ -92,35 +92,50 @@ The CARLOS EMR project uses a Docker-based devcontainer. Here is how I set up th
 
 ### Steps to Reproduce
 
-The upload validation in `PathValidationUtils.validateFileName()` strips special characters at upload time, so a malicious filename cannot be uploaded through the normal UI. To demonstrate the vulnerability in the rendering layer, a file is placed directly on the container filesystem — bypassing the upload path but exercising the exact code path that `efmimagemanager.jsp` uses to read and render filenames.
+The upload path sanitizes filenames (`PathValidationUtils.validateFileName()` strips everything outside `[a-zA-Z0-9._]`), so a malicious name can't get in through the UI. The actual vulnerable code is the **rendering layer**, so I exercised it directly by placing malicious-named files on disk in the directory the running app reads. `EFormUtil.listImages()` simply calls `dir.list()` — no extension or content filter — so whatever filename sits there is passed straight into `efmimagemanager.jsp` and rendered. That is the code path being attacked.
 
-1. Start the devcontainer and log in at `http://localhost:8080/carlos` (`carlosdoc` / `carlos2026`).
+> **One real constraint:** Linux filenames cannot contain `/`, so the issue's original `');alert(1);//.jpg` payload is **impossible to create** (the `//` makes `touch` fail). Every payload below is deliberately `/`-free.
 
-2. Find the eform image directory inside the container:
+1. Start the devcontainer / app and confirm you can reach `http://localhost:8080/carlos`.
+
+2. In the container terminal, create the eform image directory and plant two malicious filenames — one crafted for each output sink. The directory comes from the live config (`/root/carlos.properties` → `EFORM_IMAGES_DIR=/var/lib/OscarDocument/oscar/eform/images/`) and starts empty:
    ```bash
-   docker exec -it carlos-tomcat-dev find / -path "*eform*" -name "*.jpg" 2>/dev/null
-   ```
-   Use the directory of any result as the target path.
-
-3. Place a file with a malicious filename directly into that directory:
-   ```bash
-   docker exec carlos-tomcat-dev touch "/path/to/eform/images/');alert(1);//.jpg"
+   mkdir -p /var/lib/OscarDocument/oscar/eform/images
+   # Payload A — breaks out of the title="" attribute (line 100), fires on hover:
+   touch '/var/lib/OscarDocument/oscar/eform/images/x" onmouseover="alert(document.domain).png'
+   # Payload B — breaks out of the onclick showImage('...') JS string (line 102), fires on click:
+   touch "/var/lib/OscarDocument/oscar/eform/images/'+alert(document.domain)+'.png"
    ```
 
-4. Navigate to the eform image manager in the browser (log in, open any eform, and access the image manager from within it).
+3. In the browser, log in (`carlosdoc` / `carlos2026` / PIN `2026`) and navigate directly to the image manager:
+   ```
+   http://localhost:8080/carlos/eform/efmimagemanager
+   ```
 
-5. Observe the result — right-click → View Page Source and search for the filename. You will see `');alert(1);//.jpg` injected raw into the `title` attribute, the `onclick` string, and the link text without any encoding.
+4. Both files appear in the image table. Trigger each sink:
+   - **Hover** the `x" onmouseover=...` row → an `alert(document.domain)` pops — confirms the unencoded **`title` attribute** sink (line 100).
+   - **Click** the `'+alert(document.domain)+'.png` filename link → an `alert(document.domain)` pops — confirms the unencoded **`onclick` JavaScript string** sink (line 102).
+
+5. (Optional) Right-click → View Page Source and search for the filenames to see the raw, unencoded payloads written straight into the HTML.
+
+If both alerts fire, issue #2316 is reproduced. If the rows appear but the alerts do **not** fire, the filesystem may have altered the filenames (e.g. stripped quotes) — inspect the names as actually listed and adjust the payloads accordingly.
 
 ### Reproduction Evidence
 
 - **Working branch (fork):** https://github.com/RLinV1/carlos/tree/fix-issue-2316
-- **Screenshots/logs:** `image.png` (devcontainer build error during first `make install`, resolved on rerun). Page-source capture of the injected filename to be added with the reproduction commit.
+- **Screenshots/logs:** ![This alert happens when clicking on the image](image-1.png)
+![This error happens on hover over](image-2.png)
+
 - **My findings:**
-  - The vulnerability reproduces **consistently** (confirmed across two separate page loads, not a fluke). Once a file named `');alert(1);//.jpg` exists in the eform image directory, every render of `efmimagemanager.jsp` emits the filename unencoded in all three locations.
-  - **Expected behavior:** the filename should appear encoded — e.g. the `'` should be escaped before it lands inside the `onclick` JavaScript string and the `"` should be HTML-attribute-encoded inside `title`.
-  - **Actual behavior:** View Page Source shows the raw bytes `');alert(1);//.jpg` written verbatim into the `title` attribute, the `showImage('<%=fileURL%>', ...)` `onclick` string, and the link text. In the `onclick` context the leading `');` closes the JavaScript string and call, demonstrating the sink is live.
-  - **Key insight:** the bug is **only** latent because `PathValidationUtils.validateFileName()` strips everything outside `[a-zA-Z0-9._]` at upload time. Reproduction required dropping the file directly onto the container filesystem (`docker exec ... touch`) to bypass that single input filter — which is exactly why the issue is framed as *defense-in-depth*: the rendering layer trusts upstream sanitization that could be weakened, bypassed, or skipped by a future upload path.
-  - **Reference pattern confirmed:** line 107's `deleteImg()` call already wraps `curimage` in `<carlos:encode context="javaScriptAttribute">`, so the same filename renders **safely** there in the same page — proving the fix pattern works and the three other sinks are simply inconsistent omissions.
+  - The vulnerability reproduces **consistently** — both planted payloads fired their `alert(document.domain)` every time the image manager page was loaded, not just once. This is live JavaScript execution, not merely raw text appearing in the page source.
+  - **Two distinct sinks confirmed by actual code execution:**
+    - **Line 100, `title` attribute** (`<td title="<%=curimage%>">`). Payload `x" onmouseover="alert(document.domain).png`: the `"` closes the `title` attribute early so the rest becomes a new attribute — `<td title="x" onmouseover="alert(document.domain).png">` — and hovering the cell fires the injected `onmouseover` → a clean `alert(document.domain)`, no navigation.
+    - **Line 102, `onclick` JS string** (`onclick="showImage('<%=fileURL%>', ...)"`, where `fileURL = contextPath + "/eform/displayImage?imagefile=" + filename`). Payload `'+alert(document.domain)+'.png`: the `'+` closes the JS string mid-URL so the alert runs while the argument is being built — `showImage('/carlos/eform/displayImage?imagefile=' + alert(document.domain) + '.png', 'image0'); return false;` — and the trailing `+ '.png'` cleanly absorbs the rest of the template so the statement stays syntactically valid. Clicking the link fires the alert immediately.
+  - **Constraint discovered:** Linux filenames cannot contain `/`, so the issue's original `');alert(1);//.jpg` payload is impossible to create (`touch` fails). Both working payloads above are `/`-free — the `onclick` one swaps the `//` comment trick for `+ '.png'` concatenation to stay valid.
+  - **Expected behavior:** the filename should be context-encoded at output — the `"` HTML-attribute-encoded inside `title`, and the `'` JavaScript-escaped inside the `onclick` string — so neither can break out of its surrounding context.
+  - **Actual behavior:** the raw filename is written verbatim into both contexts, so attacker-controlled characters become live HTML/JS and the alerts execute.
+  - **Key insight:** the bug is **only** latent in normal use because `PathValidationUtils.validateFileName()` strips everything outside `[a-zA-Z0-9._]` at upload time, and `EFormUtil.listImages()` applies no filter of its own (just `dir.list()`). Reproduction required planting the files **directly on the filesystem** (`/var/lib/OscarDocument/oscar/eform/images/`) to bypass that single input filter — which is exactly why the issue is framed as *defense-in-depth*: the rendering layer trusts upstream sanitization that could be weakened, bypassed, or skipped by a future upload path.
+  - **Reference pattern confirmed:** line 107's `deleteImg()` call already wraps `curimage` in `<carlos:encode context="javaScriptAttribute">`, so a malicious filename renders **safely** there in the same page — proving the fix pattern works and the other sinks are simply inconsistent omissions.
 
 ---
 
