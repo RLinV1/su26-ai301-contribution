@@ -87,8 +87,9 @@ The CARLOS EMR project uses a Docker-based devcontainer. Here is how I set up th
 
 **Challenges faced**
 - App intially failed with make install but a rerun of make install worked.
-- App also took well over 30 minutes in my local machine to start and requires patience
-![Error](image.png)
+- App also took well over 2 hours in my local machine to start and requires patience
+<img width="872" height="211" alt="image" src="https://github.com/user-attachments/assets/5f324c6c-37c3-4dc8-aa6e-c3ba08997de5" />
+
 
 ### Steps to Reproduce
 
