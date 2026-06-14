@@ -218,7 +218,31 @@ Using UMPIRE framework (adapted):
 
 ### Manual Testing
 
-[What you tested manually and results]
+I verified the fix with a before/after comparison against the three planted payloads from the [Steps to Reproduce](#steps-to-reproduce). Because input sanitization blocks malicious filenames at upload, the files were placed directly on disk in `/var/lib/OscarDocument/oscar/eform/images/` to exercise the rendering layer. Note: hot reload did not work in this 9p/WSL2 environment, so after editing the JSP I manually copied it into the deployed exploded WAR (`/usr/local/tomcat/webapps/carlos/...`) and cleared Jasper's compiled cache so Tomcat recompiled the page on the next request.
+
+**Before the fix (baseline — bug reproduced):** loading `http://localhost:8080/carlos/eform/efmimagemanager` with the three files present, each sink executed `alert(document.domain)`:
+
+| # | Payload filename | Sink (line) | Trigger | Result before fix |
+|---|------------------|-------------|---------|-------------------|
+| A | `x" onmouseover="alert(document.domain).png` | `title` attribute (100) | hover the row | ✅ alert fired |
+| B | `'+alert(document.domain)+'.png` | `onclick` JS string (102) | click the filename link | ✅ alert fired |
+| C | `<img src=x onerror=alert(document.domain)>.png` | link text / HTML body (102) | automatic on page render | ✅ alert fired |
+
+View Page Source confirmed the raw, unencoded payloads were written straight into the HTML.
+
+**After the fix (same three files, no payload changes):** reloaded the same page and re-ran every trigger:
+
+| # | Trigger | Result after fix |
+|---|---------|-----------------|
+| A | hover the row | ❌ no alert — filename shown as inert text in the `title` |
+| B | click the filename link | ❌ no alert — link behaves normally |
+| C | page render | ❌ no alert — no injected `<img>` tag is created |
+
+View Page Source after the fix showed the special characters rendered as **escaped HTML entities** (e.g. `"` → `&#34;`, `'`/`<`/`>` escaped per context) instead of live markup, confirming the `<carlos:encode>` contexts are applied at each sink.
+
+**No regression:** a normal filename (e.g. `xray.png`) still displays correctly and the `showImage(...)` / `deleteImg(...)` buttons continue to function exactly as before.
+
+A screen recording of the reproduction and the post-fix behavior is embedded under [Implementation Notes](#implementation-notes) and the [Reproduction Evidence](#reproduction-evidence) section.
 
 ---
 
