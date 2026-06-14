@@ -226,17 +226,43 @@ Using UMPIRE framework (adapted):
 
 ### Week [X] Progress
 
-[What you built this week, challenges faced, decisions made]
+**Issue #2316 — XSS defense-in-depth in `efmimagemanager.jsp` (eForm Image Library)**
+
+**What was built:** Added output encoding to three previously-unencoded sinks where eForm image filenames were rendered into the page. Wrapped each in the project's null-safe `<carlos:encode>` tag with the context appropriate to where the value lands.
+
+**Challenges faced:**
+- **Reproducing the bug required bypassing input sanitization.** `PathValidationUtils.validateFileName()` strips everything outside `[a-zA-Z0-9._]` at upload, so a malicious filename can't be uploaded through the UI. I had to plant files directly on disk (`/var/lib/OscarDocument/oscar/eform/images/`, the path the running app reads from `EFORM_IMAGES_DIR` in `/root/carlos.properties`) to exercise the rendering layer.
+- **The issue's original payload (`');alert(1);//.jpg`) is impossible** — `//` contains `/`, which Linux disallows in filenames. I used `/`-free equivalents instead.
+- **Hot reload silently doesn't work in this environment.** The workspace is on a 9p (WSL2/Windows) mount; `inotify` doesn't receive events on 9p, so the `setup-hot-reload.sh` watcher never synced edits (0 "Updated:" lines in its log). I worked around it by manually `cp`-ing the JSP into the deployed exploded WAR (`/usr/local/tomcat/webapps/carlos/...`) and clearing Jasper's compiled cache so Tomcat recompiles on next request. (The same 9p mount also made the initial build take ~2h.)
+
+**Decisions made:**
+- Matched the fix to the already-correct **line 107** (`deleteImg()` uses `javaScriptAttribute`) for internal consistency rather than inventing a new pattern.
+- Used **context-specific encoding per sink** rather than one blanket encoder, because each value lands in a different context (HTML attribute vs. JS-in-attribute vs. HTML body).
+- Left `<%="image" + i%>` unencoded — it's a server-controlled loop integer, no user input.
 
 ### Week [Y] Progress
 
-[Continue documenting as you work]
+[continue as you work — e.g. PR review feedback, CI results, reporter verification of the fix]
 
 ### Code Changes
 
-- **Files modified:** [List]
-- **Key commits:** [Links to important commits]
-- **Approach decisions:** [Why you chose certain approaches]
+**Files modified:**
+- `src/main/webapp/WEB-INF/jsp/eform/efmimagemanager.jsp` (only file changed)
+
+The change (2 lines, 3 sinks):
+
+| Line | Sink | Context applied |
+|------|------|-----------------|
+| 100  | `title=""` attribute (`curimage`) | `htmlAttribute` |
+| 102  | `onclick` `showImage()` JS string (`fileURL`) | `javaScriptAttribute` |
+| 102  | link text / HTML body (`curimage`) | `html` |
+
+**Key commits:** Not yet committed/pushed — staged with conventional message `fix(eform): encode image filenames in efmimagemanager.jsp to prevent XSS` (references `fixes #2316`). Will push to fork `RLinV1/carlos` on branch `fix-issue-2316`. _(Add the commit/PR link here once pushed.)_
+
+**Approach decisions / why:**
+- **`<carlos:encode>` (null-safe wrapper) over raw OWASP `Encode.*` / `<e:>`** — project policy: raw OWASP renders the literal string `"null"` for null values; the CARLOS wrapper coalesces null to empty. CI (`check-encoder-null-safety.sh`) enforces this.
+- **Defense-in-depth framing** — not currently exploitable via the UI (upload sanitization blocks it), but the rendering layer shouldn't rely solely on upstream input filtering; classified Low severity accordingly.
+- **Verification method** — reproduced all three sinks with distinct payloads (hover/`title`, click/`onclick`, on-render `<img onerror>`/link-text), then confirmed each goes silent after the fix and View Page Source shows escaped entities.
 
 
 
@@ -262,15 +288,18 @@ https://github.com/user-attachments/assets/9acc8059-c5c7-4f65-8e77-885b09e88793
 
 ### Technical Skills Gained
 
-[What you learned technically]
+- **Cross-site scripting (XSS) in practice.** I went beyond the theory I'd seen in my security fundamentals coursework and SANS training and actually reproduced a real XSS bug — crafting three different payloads that each break out of a distinct output context (HTML attribute, JavaScript string, and HTML body) and fire `alert(document.domain)` via hover, click, and automatic on-render triggers. This made the difference between *input sanitization* and *output encoding* concrete, and taught me why defense-in-depth means encoding at the point of output rather than trusting a single upstream filter.
+- **Output encoding as the fix.** I learned how to apply context-specific encoding (`<carlos:encode>` with `htmlAttribute`, `javaScriptAttribute`, and `html` contexts) and how to find and follow an existing, already-reviewed pattern in the codebase rather than inventing my own.
+- **The open-source contribution workflow.** I learned the full process of contributing to a real project: forking, creating a working branch, reading the project's `CONTRIBUTING.md`, and following its conventions (Conventional Commits, DCO sign-off, targeting the `develop` branch, and the project's testing expectations).
+- **Working inside a Docker devcontainer.** I gained hands-on experience setting up and building a large EMR codebase in a containerized dev environment, including Maven builds and JSP hot reload.
 
 ### Challenges Overcome
 
-[What was hard and how you solved it]
+The hardest part was **understanding an unfamiliar, large codebase** and **reproducing the original development environment exactly** so my local setup behaved like the upstream repository. Standing up the Docker devcontainer, getting the Maven build to complete, and locating the precise code path the vulnerable filename travels (from `EFormUtil.listImages()` into `efmimagemanager.jsp`) took real patience. I worked through it by reading the project's setup docs and config carefully, retrying the build when `make install` failed the first time, and tracing the data flow line by line until I could confidently point to the exact unencoded output locations.
 
 ### What I'd Do Differently Next Time
 
-[Reflection on your process]
+I'd **read more of the project's documentation up front** before diving into the code — it would have saved time on both the environment setup and locating the right files. I also learned not to be impatient when working on a large codebase: builds and first-time compilation can take a long time, and pushing forward too quickly (or assuming something is broken when it's just slow) creates more problems than it solves. Next time I'll set realistic expectations for build times and let long-running steps finish.
 
 ---
 
