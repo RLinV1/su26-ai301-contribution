@@ -124,9 +124,13 @@ If both alerts fire, issue #2316 is reproduced. If the rows appear but the alert
 ### Reproduction Evidence
 
 - **Working branch (fork):** https://github.com/RLinV1/carlos/tree/fix-issue-2316
+- **Demo video:**
+
+  <video src="https://github.com/RLinV1/su26-ai301-contribution/raw/main/demo.mp4" controls width="600"></video>
+
+  (Fallback if the player doesn't load: [demo.mp4](demo.mp4))
 - **Screenshots/logs:** ![This alert happens when clicking on the image](image-1.png)
 ![This error happens on hover over](image-2.png)
-- **Demo video:** [![Watch the reproduction](https://img.youtube.com/vi/3wJtlMDen04/hqdefault.jpg)](https://youtu.be/3wJtlMDen04)
 
 - **My findings:**
   - The vulnerability reproduces **consistently** — both planted payloads fired their `alert(document.domain)` every time the image manager page was loaded, not just once. This is live JavaScript execution, not merely raw text appearing in the page source.
@@ -177,6 +181,8 @@ Using UMPIRE framework (adapted):
 3. Wrap the **line 102** link-text `<%=curimage%>` with `context="html"`.
 4. Confirm the `carlos` taglib is already declared at the top of the JSP (it must be, since line 107 uses it) — no new `<%@ taglib %>` directive needed.
 5. Leave `PathValidationUtils` and `EFormUtil` untouched — the fix is intentionally scoped to the output layer (one logical change per PR, per CONTRIBUTING.md).
+
+> **Build note:** Because this change touches **only the JSP**, no full rebuild is required. The project's **hot reload** (set up automatically by `make install`, and running in the background after the first build) picks up JSP/HTML/CSS edits — saving the file and refreshing the page in the browser shows the change. A full `make clean && make install` is only needed for changes to non-hot-reloadable file types (e.g. Java source). This made the edit-and-verify loop fast: edit `efmimagemanager.jsp` → refresh the image manager → re-check the payloads.
 
 **Implement:** Branch `fix-issue-2316` on fork `RLinV1/carlos`, targeting the upstream **`develop`** branch (per CONTRIBUTING.md — never `main`). Commits use Conventional Commits + DCO sign-off, e.g. `git commit -s -m "fix: encode image filename output in efmimagemanager.jsp"`. _(Branch link above; commit links added in Phase III as I implement.)_
 
