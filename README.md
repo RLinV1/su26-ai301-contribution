@@ -99,13 +99,15 @@ The upload path sanitizes filenames (`PathValidationUtils.validateFileName()` st
 
 1. Start the devcontainer / app and confirm you can reach `http://localhost:8080/carlos`.
 
-2. In the container terminal, create the eform image directory and plant two malicious filenames — one crafted for each output sink. The directory comes from the live config (`/root/carlos.properties` → `EFORM_IMAGES_DIR=/var/lib/OscarDocument/oscar/eform/images/`) and starts empty:
+2. In the container terminal, create the eform image directory and plant three malicious filenames — one crafted for each output sink. The directory comes from the live config (`/root/carlos.properties` → `EFORM_IMAGES_DIR=/var/lib/OscarDocument/oscar/eform/images/`) and starts empty:
    ```bash
    mkdir -p /var/lib/OscarDocument/oscar/eform/images
    # Payload A — breaks out of the title="" attribute (line 100), fires on hover:
    touch '/var/lib/OscarDocument/oscar/eform/images/x" onmouseover="alert(document.domain).png'
    # Payload B — breaks out of the onclick showImage('...') JS string (line 102), fires on click:
    touch "/var/lib/OscarDocument/oscar/eform/images/'+alert(document.domain)+'.png"
+   # Payload C — injected into the link text / HTML body (line 102), fires automatically on page render:
+   touch '/var/lib/OscarDocument/oscar/eform/images/<img src=x onerror=alert(document.domain)>.png'
    ```
 
 3. In the browser, log in (`carlosdoc` / `carlos2026` / PIN `2026`) and navigate directly to the image manager:
@@ -113,13 +115,14 @@ The upload path sanitizes filenames (`PathValidationUtils.validateFileName()` st
    http://localhost:8080/carlos/eform/efmimagemanager
    ```
 
-4. Both files appear in the image table. Trigger each sink:
+4. All three files appear in the image table. Trigger each sink:
    - **Hover** the `x" onmouseover=...` row → an `alert(document.domain)` pops — confirms the unencoded **`title` attribute** sink (line 100).
    - **Click** the `'+alert(document.domain)+'.png` filename link → an `alert(document.domain)` pops — confirms the unencoded **`onclick` JavaScript string** sink (line 102).
+   - **No interaction needed** for the `<img src=x onerror=...>.png` row → the injected `<img>` tag tries to load `src=x`, fails, and its `onerror` fires `alert(document.domain)` automatically on page render — confirms the unencoded **HTML link-text / body** sink (line 102).
 
 5. (Optional) Right-click → View Page Source and search for the filenames to see the raw, unencoded payloads written straight into the HTML.
 
-If both alerts fire, issue #2316 is reproduced. If the rows appear but the alerts do **not** fire, the filesystem may have altered the filenames (e.g. stripped quotes) — inspect the names as actually listed and adjust the payloads accordingly.
+If all three alerts fire, issue #2316 is reproduced. If the rows appear but the alerts do **not** fire, the filesystem may have altered the filenames (e.g. stripped quotes) — inspect the names as actually listed and adjust the payloads accordingly.
 
 ### Reproduction Evidence
 
@@ -133,13 +136,14 @@ If both alerts fire, issue #2316 is reproduced. If the rows appear but the alert
 ![This error happens on hover over](image-2.png)
 
 - **My findings:**
-  - The vulnerability reproduces **consistently** — both planted payloads fired their `alert(document.domain)` every time the image manager page was loaded, not just once. This is live JavaScript execution, not merely raw text appearing in the page source.
-  - **Two distinct sinks confirmed by actual code execution:**
-    - **Line 100, `title` attribute** (`<td title="<%=curimage%>">`). Payload `x" onmouseover="alert(document.domain).png`: the `"` closes the `title` attribute early so the rest becomes a new attribute — `<td title="x" onmouseover="alert(document.domain).png">` — and hovering the cell fires the injected `onmouseover` → a clean `alert(document.domain)`, no navigation.
-    - **Line 102, `onclick` JS string** (`onclick="showImage('<%=fileURL%>', ...)"`, where `fileURL = contextPath + "/eform/displayImage?imagefile=" + filename`). Payload `'+alert(document.domain)+'.png`: the `'+` closes the JS string mid-URL so the alert runs while the argument is being built — `showImage('/carlos/eform/displayImage?imagefile=' + alert(document.domain) + '.png', 'image0'); return false;` — and the trailing `+ '.png'` cleanly absorbs the rest of the template so the statement stays syntactically valid. Clicking the link fires the alert immediately.
-  - **Constraint discovered:** Linux filenames cannot contain `/`, so the issue's original `');alert(1);//.jpg` payload is impossible to create (`touch` fails). Both working payloads above are `/`-free — the `onclick` one swaps the `//` comment trick for `+ '.png'` concatenation to stay valid.
-  - **Expected behavior:** the filename should be context-encoded at output — the `"` HTML-attribute-encoded inside `title`, and the `'` JavaScript-escaped inside the `onclick` string — so neither can break out of its surrounding context.
-  - **Actual behavior:** the raw filename is written verbatim into both contexts, so attacker-controlled characters become live HTML/JS and the alerts execute.
+  - The vulnerability reproduces **consistently** — all three planted payloads fired their `alert(document.domain)` every time the image manager page was loaded, not just once. This is live JavaScript execution, not merely raw text appearing in the page source.
+  - **Three distinct sinks confirmed by actual code execution:**
+    - **Line 100, `title` attribute** (`<td title="<%=curimage%>">`). Payload `x" onmouseover="alert(document.domain).png`: the `"` closes the `title` attribute early so the rest becomes a new attribute — `<td title="x" onmouseover="alert(document.domain).png">` — and hovering the cell fires the injected `onmouseover` → a clean `alert(document.domain)`, no navigation. **Trigger: hover.**
+    - **Line 102, `onclick` JS string** (`onclick="showImage('<%=fileURL%>', ...)"`, where `fileURL = contextPath + "/eform/displayImage?imagefile=" + filename`). Payload `'+alert(document.domain)+'.png`: the `'+` closes the JS string mid-URL so the alert runs while the argument is being built — `showImage('/carlos/eform/displayImage?imagefile=' + alert(document.domain) + '.png', 'image0'); return false;` — and the trailing `+ '.png'` cleanly absorbs the rest of the template so the statement stays syntactically valid. **Trigger: click.**
+    - **Line 102, HTML link text / body** (`><%=curimage%></a>`). Payload `<img src=x onerror=alert(document.domain)>.png`: the filename is written into the page body verbatim, so it becomes a **brand-new `<img>` tag** rather than text. The browser tries to fetch `src=x`, that load fails, and the element's `onerror` handler runs the JS. **Trigger: automatic on page render — no user interaction.** (A `<svg onload=...>` payload achieves the same via the load event instead of error.)
+  - **Constraint discovered:** Linux filenames cannot contain `/`, so the issue's original `');alert(1);//.jpg` payload is impossible to create (`touch` fails). All three working payloads are `/`-free — the `onclick` one swaps the `//` comment trick for `+ '.png'` concatenation to stay valid.
+  - **Expected behavior:** the filename should be context-encoded at output — the `"` HTML-attribute-encoded inside `title`, the `'` JavaScript-escaped inside the `onclick` string, and the `<`/`>` HTML-body-encoded in the link text — so none can break out of its surrounding context.
+  - **Actual behavior:** the raw filename is written verbatim into all three contexts, so attacker-controlled characters become live HTML/JS and the alerts execute.
   - **Key insight:** the bug is **only** latent in normal use because `PathValidationUtils.validateFileName()` strips everything outside `[a-zA-Z0-9._]` at upload time, and `EFormUtil.listImages()` applies no filter of its own (just `dir.list()`). Reproduction required planting the files **directly on the filesystem** (`/var/lib/OscarDocument/oscar/eform/images/`) to bypass that single input filter — which is exactly why the issue is framed as *defense-in-depth*: the rendering layer trusts upstream sanitization that could be weakened, bypassed, or skipped by a future upload path.
   - **Reference pattern confirmed:** line 107's `deleteImg()` call already wraps `curimage` in `<carlos:encode context="javaScriptAttribute">`, so a malicious filename renders **safely** there in the same page — proving the fix pattern works and the other sinks are simply inconsistent omissions.
 
