@@ -1,3 +1,4 @@
+
 # Contribution [1]: [Security] RLinV1 XSS defense-in-depth — image filename unencoded in eform/efmimagemanager.jsp (claude assist)
 
 **Contribution Number:** [1]  
@@ -128,10 +129,10 @@ If all three alerts fire, issue #2316 is reproduced. If the rows appear but the 
 
 - **Working branch (fork):** https://github.com/RLinV1/carlos/tree/fix-issue-2316
 - **Demo video:**
+https://github.com/user-attachments/assets/7f700d29-ea0c-41a5-959d-aae0c0a7614f
 
-  <video src="https://github.com/RLinV1/su26-ai301-contribution/raw/main/demo.mp4" controls width="600"></video>
 
-  (Fallback if the player doesn't load: [demo.mp4](demo.mp4))
+  
 - **Screenshots/logs:** ![This alert happens when clicking on the image](image-1.png)
 ![This error happens on hover over](image-2.png)
 
@@ -199,6 +200,7 @@ Using UMPIRE framework (adapted):
 
 **Evaluate:** See Testing Strategy below — manual before/after reproduction with the malicious filename, plus a JUnit 5 encoding assertion to lock the behavior in.
 
+
 ---
 
 ## Testing Strategy
@@ -235,6 +237,10 @@ Using UMPIRE framework (adapted):
 - **Files modified:** [List]
 - **Key commits:** [Links to important commits]
 - **Approach decisions:** [Why you chose certain approaches]
+
+
+
+https://github.com/user-attachments/assets/9acc8059-c5c7-4f65-8e77-885b09e88793
 
 ---
 
