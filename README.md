@@ -126,6 +126,7 @@ If both alerts fire, issue #2316 is reproduced. If the rows appear but the alert
 - **Working branch (fork):** https://github.com/RLinV1/carlos/tree/fix-issue-2316
 - **Screenshots/logs:** ![This alert happens when clicking on the image](image-1.png)
 ![This error happens on hover over](image-2.png)
+- **Demo video:** [![Watch the reproduction](https://img.youtube.com/vi/3wJtlMDen04/hqdefault.jpg)](https://youtu.be/3wJtlMDen04)
 
 - **My findings:**
   - The vulnerability reproduces **consistently** — both planted payloads fired their `alert(document.domain)` every time the image manager page was loaded, not just once. This is live JavaScript execution, not merely raw text appearing in the page source.
