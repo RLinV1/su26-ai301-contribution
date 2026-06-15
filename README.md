@@ -366,12 +366,16 @@ https://github.com/user-attachments/assets/9acc8059-c5c7-4f65-8e77-885b09e88793
 >
 > - [x] Tests added for new/changed behavior (`EformImageFilenameEncodingUnitTest` — one per encoding context)
 > - [x] All tests passing
-> - [x] Follows project style guide (uses the mandated null-safe `<carlos:encode>` wrapper; Conventional Commits + DCO sign-off)
+> - [x] Follows project style guide (uses the mandated null-safe `SafeEncode` utility; Conventional Commits + DCO sign-off)
 > - [x] No breaking changes introduced (legitimate filenames render and function unchanged)
 > - [x] Documentation updated (if applicable) — N/A; view-layer encoding only
 
 **Maintainer Feedback:**
-- _(none yet — awaiting first review)_
+- _(none yet — awaiting first review from a project maintainer)_
+
+**Pre-submission feedback (AI-assisted self-review):**
+- During implementation I initially planned to use the `<carlos:encode>` JSP tag. AI-assisted review flagged that the repo's CI lint (`check-encoder-null-safety.sh`) bans raw OWASP `Encode.*` and that the project's mandated null-safe wrapper is the `SafeEncode` utility. Based on that, I switched to `SafeEncode` scriptlets (`<%= SafeEncode.forXxx(...) %>`) — which are also a better fit for this scriptlet-heavy JSP and avoid nested-quote clutter. I reviewed and verified this against the codebase before committing.
+- AI-assisted review also pointed out that the `deleteImg('…')` call on **line 107** should be standardized to `SafeEncode.forJavaScriptAttribute(curimage)` along with the other sinks, so the whole file uses one consistent encoder rather than a mix. I applied that change too after confirming it matched the JS-string-in-attribute context.
 
 **Status:** Awaiting review
 
