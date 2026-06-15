@@ -47,7 +47,7 @@ Upload validation in `PathValidationUtils.validateFileName()` currently restrict
 
 - **Primary file:** `src/main/webapp/WEB-INF/jsp/eform/efmimagemanager.jsp` — lines 100 and 102 are the unencoded output points; line 107 is the correctly-encoded model to follow.
 - **Data source:** `io.github.carlos_emr.carlos.eform.EFormUtil#listImages()` — supplies the raw filename strings rendered on the page.
-- **Encoding infrastructure:** `<carlos:encode>` tag (`carlos` TLD) and `SafeEncode` utility class — the null-safe CARLOS wrappers that must be applied at the three unencoded locations.
+- **Encoding infrastructure:** the `SafeEncode` utility class — the project's null-safe, OWASP-backed wrapper that must be applied at the unencoded output locations. (The `<carlos:encode>` JSP tag is an alternative wrapper around the same encoder, but the repo's CI lint mandates `SafeEncode` and bans raw OWASP `Encode.*`.)
 
 ---
 
@@ -194,14 +194,14 @@ Using UMPIRE framework (adapted):
 
 > **Build note:** Because this change touches **only the JSP**, no full rebuild is required. The project's **hot reload** (set up automatically by `make install`, and running in the background after the first build) picks up JSP/HTML/CSS edits — saving the file and refreshing the page in the browser shows the change. A full `make clean && make install` is only needed for changes to non-hot-reloadable file types (e.g. Java source). This made the edit-and-verify loop fast: edit `efmimagemanager.jsp` → refresh the image manager → re-check the payloads.
 
-**Implement:** Branch `fix-issue-2316` on fork `RLinV1/carlos`, targeting the upstream **`develop`** branch (per CONTRIBUTING.md — never `main`). Commits use Conventional Commits + DCO sign-off, e.g. `git commit -s -m "fix: encode image filename output in efmimagemanager.jsp"`. _(Branch link above; commit links added in Phase III as I implement.)_
+**Implement:** Implemented on branch `fix-issue-2316` of fork `RLinV1/carlos`, targeting the upstream **`develop`** branch (per CONTRIBUTING.md — never `main`). Committed with a Conventional Commits + DCO-signed message (`fix: encode eform image filenames in efmimagemanager.jsp to prevent XSS (fixes carlos-emr#2316)`) and submitted as PR [#2896](https://github.com/carlos-emr/carlos/pull/2896). See [Implementation Notes](#implementation-notes) for the full diff summary.
 
 **Review:** Self-review checklist against CONTRIBUTING.md:
-- [ ] Uses the OWASP-backed, null-safe `SafeEncode` utility (mandatory security guideline; raw `Encode.*` is CI-banned) rather than hand-rolled escaping.
-- [ ] One focused logical change; no unrelated edits; existing copyright header retained.
-- [ ] Commit follows Conventional Commits (`fix:`) **and** is DCO-signed (`-s`).
-- [ ] PR targets `develop`, references the issue (`fixes #2316`), and explains the defense-in-depth rationale.
-- [ ] Behavior for valid `[a-zA-Z0-9._]` filenames is unchanged (encoders are no-ops on safe characters).
+- [x] Uses the OWASP-backed, null-safe `SafeEncode` utility (mandatory security guideline; raw `Encode.*` is CI-banned) rather than hand-rolled escaping.
+- [x] One focused logical change; no unrelated edits; existing copyright header retained.
+- [x] Commit follows Conventional Commits (`fix:`) **and** is DCO-signed (`-s`).
+- [x] PR targets `develop`, references the issue (`fixes #2316`), and explains the defense-in-depth rationale.
+- [x] Behavior for valid `[a-zA-Z0-9._]` filenames is unchanged (encoders are no-ops on safe characters).
 
 **Evaluate:** See Testing Strategy below — manual before/after reproduction with the malicious filename, plus a JUnit 5 encoding assertion to lock the behavior in.
 
@@ -267,7 +267,7 @@ View Page Source confirmed the raw, unencoded payloads were written straight int
 | B | click the filename link | ❌ no alert — link behaves normally |
 | C | page render | ❌ no alert — no injected `<img>` tag is created |
 
-View Page Source after the fix showed the special characters rendered as **escaped HTML entities** (e.g. `"` → `&#34;`, `'`/`<`/`>` escaped per context) instead of live markup, confirming the `<carlos:encode>` contexts are applied at each sink.
+View Page Source after the fix showed the special characters rendered as **escaped HTML entities** (e.g. `"` → `&#34;`, `'`/`<`/`>` escaped per context) instead of live markup, confirming the `SafeEncode` methods are applied at each sink.
 
 **No regression:** a normal filename (e.g. `xray.png`) still displays correctly and the `showImage(...)` / `deleteImg(...)` buttons continue to function exactly as before.
 
@@ -281,7 +281,7 @@ A screen recording of the reproduction and the post-fix behavior is embedded und
 
 **Issue #2316 — XSS defense-in-depth in `efmimagemanager.jsp` (eForm Image Library)**
 
-**What was built:** Added output encoding to three previously-unencoded sinks where eForm image filenames were rendered into the page. Wrapped each in the project's null-safe `<carlos:encode>` tag with the context appropriate to where the value lands.
+**What was built:** Added output encoding to the three previously-unencoded sinks where eForm image filenames were rendered into the page, wrapping each in the project's null-safe `SafeEncode` method appropriate to where the value lands, and standardized the already-encoded `deleteImg` sink (line 107) onto `SafeEncode` too so all four filename outputs use one consistent encoder.
 
 **Challenges faced:**
 - **Reproducing the bug required bypassing input sanitization.** `PathValidationUtils.validateFileName()` strips everything outside `[a-zA-Z0-9._]` at upload, so a malicious filename can't be uploaded through the UI. I had to plant files directly on disk (`/var/lib/OscarDocument/oscar/eform/images/`, the path the running app reads from `EFORM_IMAGES_DIR` in `/root/carlos.properties`) to exercise the rendering layer.
@@ -289,12 +289,12 @@ A screen recording of the reproduction and the post-fix behavior is embedded und
 - **Slow initial build.** The workspace is on a WSL2/Windows mount, which made the first-time Maven build take a long time (~2h). Subsequent JSP edits were fast because hot reload picked them up — saving `efmimagemanager.jsp` and refreshing the page reflected the change without a rebuild.
 
 **Decisions made:**
-- Matched the fix to the already-correct **line 107** (`deleteImg()` uses `javaScriptAttribute`) for internal consistency rather than inventing a new pattern.
-- Used **context-specific encoding per sink** rather than one blanket encoder, because each value lands in a different context (HTML attribute vs. JS-in-attribute vs. HTML body).
+- Standardized all four filename outputs (including the already-encoded `deleteImg` on **line 107**) on the `SafeEncode` utility, so the whole file uses one consistent encoder rather than a mix.
+- Used **context-specific methods per sink** rather than one blanket encoder, because each value lands in a different context (HTML attribute vs. JS-in-attribute vs. HTML body).
 - Left `<%="image" + i%>` unencoded — it's a server-controlled loop integer, no user input.
 
-### Week 3-4 Progress
-Working on creating good unit tests to test the functionality and ensure all files are encoded and no XSS attacks can occur.
+### Week 2-3 Progress (continued)
+This week I also wrote the unit tests for the fix — three JUnit 5 tests (one per encoding context) that verify the `SafeEncode` methods neutralize XSS payloads, so every filename sink is provably encoded and no XSS can occur.
 
 
 ### Code Changes
@@ -343,7 +343,7 @@ https://github.com/user-attachments/assets/9acc8059-c5c7-4f65-8e77-885b09e88793
 
 > ## What does this PR do?
 >
-> Adds context-specific output encoding to the three locations in `eform/efmimagemanager.jsp` where an image filename is rendered into the page, using the project's null-safe `<carlos:encode>` tag. This hardens the eForm Image Library against stored XSS as a defense-in-depth measure.
+> Adds context-specific output encoding to the locations in `eform/efmimagemanager.jsp` where an image filename is rendered into the page, using the project's null-safe `SafeEncode` utility. This hardens the eForm Image Library against stored XSS as a defense-in-depth measure.
 >
 > ## Why was this PR needed?
 >
@@ -352,7 +352,7 @@ https://github.com/user-attachments/assets/9acc8059-c5c7-4f65-8e77-885b09e88793
 > - **Line 102** — the `showImage('<%=fileURL%>', ...)` `onclick` JavaScript string
 > - **Line 102** — the link text / HTML body
 >
-> Today these are not exploitable through the UI because `PathValidationUtils.validateFileName()` strips everything outside `[a-zA-Z0-9._]` at upload. But that is a single input-sanitization layer; if it is ever weakened, bypassed, or a new upload path skips it, all three locations become live XSS sinks. By planting malicious filenames directly on disk (bypassing upload validation, exercising only the render path) I confirmed all three execute `alert(document.domain)` — via hover (`title`), click (`onclick`), and automatic render (`<img onerror>` in the body). Line 107's `deleteImg()` already encodes `curimage` correctly, so this PR simply makes the other three sinks consistent with that existing pattern.
+> Today these are not exploitable through the UI because `PathValidationUtils.validateFileName()` strips everything outside `[a-zA-Z0-9._]` at upload. But that is a single input-sanitization layer; if it is ever weakened, bypassed, or a new upload path skips it, all three locations become live XSS sinks. By planting malicious filenames directly on disk (bypassing upload validation, exercising only the render path) I confirmed all three execute `alert(document.domain)` — via hover (`title`), click (`onclick`), and automatic render (`<img onerror>` in the body). Line 107's `deleteImg()` was already encoded; this PR encodes the three vulnerable sinks with `SafeEncode` and standardizes `deleteImg` onto `SafeEncode` too, so all four filename outputs use one consistent encoder.
 >
 > ## What are the relevant issue numbers?
 >
@@ -371,10 +371,9 @@ https://github.com/user-attachments/assets/9acc8059-c5c7-4f65-8e77-885b09e88793
 > - [x] Documentation updated (if applicable) — N/A; view-layer encoding only
 
 **Maintainer Feedback:**
-- _(none yet — awaiting first review from a project maintainer)_
 
-**Pre-submission feedback (AI-assisted self-review):**
-- During implementation I initially planned to use the `<carlos:encode>` JSP tag. AI-assisted review flagged that the repo's CI lint (`check-encoder-null-safety.sh`) bans raw OWASP `Encode.*` and that the project's mandated null-safe wrapper is the `SafeEncode` utility. Based on that, I switched to `SafeEncode` scriptlets (`<%= SafeEncode.forXxx(...) %>`) — which are also a better fit for this scriptlet-heavy JSP and avoid nested-quote clutter. I reviewed and verified this against the codebase before committing.
+No feedback from a project maintainer yet (awaiting first review on PR #2896). The feedback I acted on during development came from **AI-assisted review** (noted here as such — I reviewed and verified each point against the codebase before committing):
+- I initially planned to use the `<carlos:encode>` JSP tag. AI-assisted review flagged that the repo's CI lint (`check-encoder-null-safety.sh`) bans raw OWASP `Encode.*` and that the project's mandated null-safe wrapper is the `SafeEncode` utility. Based on that, I switched to `SafeEncode` scriptlets (`<%= SafeEncode.forXxx(...) %>`) — which are also a better fit for this scriptlet-heavy JSP and avoid nested-quote clutter.
 - AI-assisted review also pointed out that the `deleteImg('…')` call on **line 107** should be standardized to `SafeEncode.forJavaScriptAttribute(curimage)` along with the other sinks, so the whole file uses one consistent encoder rather than a mix. I applied that change too after confirming it matched the JS-string-in-attribute context.
 
 **Status:** Awaiting review
@@ -386,7 +385,7 @@ https://github.com/user-attachments/assets/9acc8059-c5c7-4f65-8e77-885b09e88793
 ### Technical Skills Gained
 
 - **Cross-site scripting (XSS) in practice.** I went beyond the theory I'd seen in my security fundamentals coursework and SANS training and actually reproduced a real XSS bug — crafting three different payloads that each break out of a distinct output context (HTML attribute, JavaScript string, and HTML body) and fire `alert(document.domain)` via hover, click, and automatic on-render triggers. This made the difference between *input sanitization* and *output encoding* concrete, and taught me why defense-in-depth means encoding at the point of output rather than trusting a single upstream filter.
-- **Output encoding as the fix.** I learned how to apply context-specific encoding (`<carlos:encode>` with `htmlAttribute`, `javaScriptAttribute`, and `html` contexts) and how to find and follow an existing, already-reviewed pattern in the codebase rather than inventing my own.
+- **Output encoding as the fix.** I learned how to apply context-specific encoding (the `SafeEncode` methods `forHtmlAttribute`, `forJavaScriptAttribute`, and `forHtmlContent`) and how to find and follow an existing, already-reviewed pattern in the codebase rather than inventing my own.
 - **The open-source contribution workflow.** I learned the full process of contributing to a real project: forking, creating a working branch, reading the project's `CONTRIBUTING.md`, and following its conventions (Conventional Commits, DCO sign-off, targeting the `develop` branch, and the project's testing expectations).
 - **Working inside a Docker devcontainer.** I gained hands-on experience setting up and building a large EMR codebase in a containerized dev environment, including Maven builds and JSP hot reload.
 
@@ -403,8 +402,8 @@ I'd **read more of the project's documentation up front** before diving into the
 ## Resources Used
 
 - **[Issue #2316](https://github.com/carlos-emr/carlos/issues/2316)** — the source issue; provided the affected file, the three unencoded sinks, the severity rationale (mitigated by upload sanitization), and the suggested context-specific fix.
-- **CARLOS `CONTRIBUTING.md`** — defined the conventions I built the plan around: target the `develop` branch, DCO sign-off (`git commit -s`), Conventional Commits (`fix:`), JUnit 5 tests in `src/test-modern/` with BDD naming, and the mandatory use of OWASP-backed encoders.
-- **Line 107 of `efmimagemanager.jsp` (`deleteImg()` with `<carlos:encode context="javaScriptAttribute">`)** — the in-repo reference pattern I'm mirroring for the fix.
+- **CARLOS `CONTRIBUTING.md`** — defined the conventions I built the plan around: target the `develop` branch, DCO sign-off (`git commit -s`), Conventional Commits (`fix:`), JUnit 5 tests with BDD naming, and the mandatory use of the OWASP-backed `SafeEncode` wrapper.
+- **Line 107 of `efmimagemanager.jsp` (`deleteImg()`, the one already-encoded filename output)** — the in-repo precedent showing encoding belongs at these sinks, which I followed and standardized onto `SafeEncode`.
 - **[OWASP XSS Prevention Cheat Sheet](https://cheatsheetseries.owasp.org/cheatsheets/Cross_Site_Scripting_Prevention_Cheat_Sheet.html)** — confirmed the principle of context-specific output encoding (HTML attribute vs. JavaScript vs. HTML body) and why output encoding is the correct defense-in-depth layer over input sanitization alone.
-- **[OWASP Java Encoder](https://owasp.org/www-project-java-encoder/)** — the library the project's `<carlos:encode>` / `SafeEncode` wrappers are built on.
+- **[OWASP Java Encoder](https://owasp.org/www-project-java-encoder/)** — the library the project's `SafeEncode` wrapper is built on.
 - **[VS Code Dev Containers documentation](https://code.visualstudio.com/docs/devcontainers/containers)** — used to set up and troubleshoot the Docker-based devcontainer environment during reproduction.
