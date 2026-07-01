@@ -376,6 +376,49 @@ No feedback from a project maintainer yet (awaiting first review on PR #2896). T
 - I initially planned to use the `<carlos:encode>` JSP tag. AI-assisted review flagged that the repo's CI lint (`check-encoder-null-safety.sh`) bans raw OWASP `Encode.*` and that the project's mandated null-safe wrapper is the `SafeEncode` utility. Based on that, I switched to `SafeEncode` scriptlets (`<%= SafeEncode.forXxx(...) %>`) — which are also a better fit for this scriptlet-heavy JSP and avoid nested-quote clutter.
 - AI-assisted review also pointed out that the `deleteImg('…')` call on **line 107** should be standardized to `SafeEncode.forJavaScriptAttribute(curimage)` along with the other sinks, so the whole file uses one consistent encoder rather than a mix. I applied that change too after confirming it matched the JS-string-in-attribute context.
 
+**Second-round AI-assisted review — four follow-up items (all addressed).** A later review pass (verified against the running app and the JSP source; it confirmed the XSS encoding itself is correct and that no payloads execute in the browser) surfaced four issues beyond the core encoding fix. I reviewed each against the codebase and fixed all four:
+
+1. **Filename not URL-encoded in `fileURL` (functional bug, line 95).** `SafeEncode.forJavaScriptAttribute` does not encode `&` (it isn't a JS-string metacharacter), so a filename containing `&`, `#`, `?`, or `=` — e.g. `photo&backup.jpg` — made `window.open()` open `/displayImage?imagefile=photo&backup.jpg`, which the browser parses as two query parameters. The server then received only `imagefile=photo` and the file lookup failed. **Fix:** URL-encode the filename when building the URL (using `URLEncoder`, which was already imported on line 31 but unused):
+   ```java
+   String fileURL = request.getContextPath() + "/eform/displayImage?imagefile="
+       + URLEncoder.encode(curimage, java.nio.charset.StandardCharsets.UTF_8);
+   ```
+   This was the priority item — a confirmed functional bug (encoding for the JS-string context and URL-encoding for the query-string context are two separate concerns, and both are needed).
+
+2. **`deleteImg()` CSRF-token race (lines 53–63).** The function built a form with `document.createElement('form')`, appended it, and called `form.submit()` in the same JS tick. CSRFGuard's `injectIntoDynamicNodes` uses a `MutationObserver`, which fires **asynchronously**, so the synchronous `form.submit()` could POST to `/eform/deleteImage` **before** the observer injected the CSRF token — a realistic security gap. **Fix:** pre-render a hidden form in the static HTML (once, outside the loop) so CSRFGuard's static injection covers it, and have `deleteImg()` just set the field value and submit:
+   ```html
+   <form id="deleteImgForm" method="post" action="<%=request.getContextPath()%>/eform/deleteImage" style="display:none;">
+       <input type="hidden" name="filename" id="deleteImgFilename"/>
+   </form>
+   ```
+   ```javascript
+   function deleteImg(image) {
+       if (confirm("<fmt:message key='eform.uploadimages.imgDelete'/>")) {
+           document.getElementById('deleteImgFilename').value = image;
+           document.getElementById('deleteImgForm').submit();
+       }
+   }
+   ```
+
+3. **Dead taglib declarations (lines 36–37).** Once this PR removed the only `<carlos:encode>` usage, both declared taglibs were unreferenced — no `<e:...>` tags and no `<carlos:...>` tags remained. **Fix:** removed both lines:
+   ```
+   <%@ taglib uri="owasp.encoder.jakarta.advanced" prefix="e" %>
+   <%@ taglib uri="carlos" prefix="carlos" %>
+   ```
+
+4. **Test missing the null-safety case (`EformImageFilenameEncodingUnitTest`).** The three existing tests cover XSS payloads, but the whole reason for `SafeEncode` over raw OWASP `Encode` is that `Encode.forHtmlContent(null)` renders the literal string `"null"` while `SafeEncode` returns `""` — and that contract wasn't tested. **Fix:** added a fourth test pinning the null-safety behavior:
+   ```java
+   @Test
+   @DisplayName("null filename renders as empty string, not the literal word null")
+   void shouldReturnEmptyString_forNullFilename() {
+       assertThat(SafeEncode.forHtmlAttribute(null)).isEmpty();
+       assertThat(SafeEncode.forJavaScriptAttribute(null)).isEmpty();
+       assertThat(SafeEncode.forHtmlContent(null)).isEmpty();
+   }
+   ```
+
+Items 1 and 2 were the priority fixes (a confirmed functional bug and a realistic security gap); items 3 and 4 are straightforward cleanup that also went in.
+
 **Status:** Awaiting review
 
 ---
